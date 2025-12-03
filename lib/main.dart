@@ -18,8 +18,11 @@ class AgriPosApp extends StatelessWidget {
         primarySwatch: Colors.green,
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFFF4F7FE),
-        // FIXED: Removed the 'cardTheme' block that was causing the error.
-        // We will rely on default Material 3 card styles which are perfectly fine.
+        cardTheme: CardThemeData(
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          color: Colors.white,
+        ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: Colors.grey.shade50,
@@ -58,7 +61,10 @@ class Invoice {
 
 class SyncService {
   static bool isOnline = true;
-  static final List<Invoice> _localDatabase = [];
+  static final List<Invoice> _localDatabase = [
+    Invoice(id: "INV-1001", customer: "Ali Farms", code: "C001", date: "2024-11-20", amount: 5000),
+    Invoice(id: "INV-1002", customer: "Green Acres", code: "C002", date: "2024-11-21", amount: 12500, syncStatus: "Pending"),
+  ];
 
   static List<Invoice> getInvoices() => _localDatabase;
   static int getPendingCount() => _localDatabase.where((i) => i.syncStatus == "Pending").length;
@@ -108,7 +114,6 @@ class LoginScreen extends StatelessWidget {
             padding: const EdgeInsets.all(20),
             child: Card(
               elevation: 10,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), // Moved shape here directly
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 400),
                 padding: const EdgeInsets.all(40),
@@ -178,10 +183,13 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
 
   Widget _getCurrentView() {
     switch (_selectedIndex) {
-      case 0: return DashboardView(onNewSale: () => setState(() => _selectedIndex = 2));
+      case 0: return DashboardView(
+        onNewSale: () => setState(() => _selectedIndex = 2),
+        onViewAllInvoices: () => setState(() => _selectedIndex = 1),
+      );
       case 1: return const InvoiceListView();
       case 2: return InvoiceCreateView(onInvoiceSaved: () => setState(() => _selectedIndex = 1));
-      default: return DashboardView(onNewSale: () => setState(() => _selectedIndex = 2));
+      default: return DashboardView(onNewSale: () => setState(() => _selectedIndex = 2), onViewAllInvoices: () => setState(() => _selectedIndex = 1));
     }
   }
 
@@ -264,25 +272,32 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
 }
 
 // ==========================================
-// 4. IMPROVED DASHBOARD UI
+// 4. DASHBOARD VIEW (FIXED 4PX OVERFLOW)
 // ==========================================
 class DashboardView extends StatelessWidget {
   final VoidCallback onNewSale;
-  const DashboardView({super.key, required this.onNewSale});
+  final VoidCallback onViewAllInvoices;
+
+  const DashboardView({super.key, required this.onNewSale, required this.onViewAllInvoices});
 
   @override
   Widget build(BuildContext context) {
     double totalSales = SyncService.getTotalSales();
     int count = SyncService.getInvoices().length;
     int pending = SyncService.getPendingCount();
-    bool isDesktop = MediaQuery.of(context).size.width > 900;
+
+    double screenWidth = MediaQuery.of(context).size.width;
+    bool isDesktop = screenWidth > 900;
+    bool isMobile = screenWidth < 600;
+
+    List<Invoice> recentInvoices = SyncService.getInvoices();
+    if(recentInvoices.length > 3) recentInvoices = recentInvoices.sublist(recentInvoices.length - 3);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Welcome Banner
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(24),
@@ -302,10 +317,11 @@ class DashboardView extends StatelessWidget {
           ),
           const SizedBox(height: 30),
 
-          // Quick Actions
           const Text("Quick Actions", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 15),
-          Row(
+          Wrap(
+            spacing: 15,
+            runSpacing: 15,
             children: [
               ElevatedButton.icon(
                 onPressed: onNewSale,
@@ -313,7 +329,6 @@ class DashboardView extends StatelessWidget {
                 label: const Text("New Invoice"),
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15)),
               ),
-              const SizedBox(width: 15),
               OutlinedButton.icon(
                 onPressed: () {},
                 icon: const Icon(Icons.sync),
@@ -324,7 +339,6 @@ class DashboardView extends StatelessWidget {
           ),
           const SizedBox(height: 30),
 
-          // Stats Grid
           const Text("Business Overview", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 15),
           GridView.count(
@@ -333,7 +347,8 @@ class DashboardView extends StatelessWidget {
             crossAxisCount: isDesktop ? 4 : 2,
             crossAxisSpacing: 20,
             mainAxisSpacing: 20,
-            childAspectRatio: 1.4,
+            // --- FIX IS HERE: Lower aspect ratio for mobile means TALLER cards ---
+            childAspectRatio: isMobile ? 0.85 : 1.2,
             children: [
               _buildStatCard("Total Sales", "PKR ${totalSales.toStringAsFixed(0)}", Icons.attach_money, Colors.blue),
               _buildStatCard("Invoices", "$count", Icons.receipt_long, Colors.orange),
@@ -341,6 +356,29 @@ class DashboardView extends StatelessWidget {
               _buildStatCard("Customers", "124", Icons.people, Colors.purple),
             ],
           ),
+
+          const SizedBox(height: 30),
+
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Recent Activity", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              TextButton(onPressed: onViewAllInvoices, child: const Text("View All"))
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (recentInvoices.isEmpty)
+            const Text("No recent invoices.", style: TextStyle(color: Colors.grey))
+          else
+            ...recentInvoices.map((inv) => Card(
+              margin: const EdgeInsets.only(bottom: 10),
+              child: ListTile(
+                leading: CircleAvatar(backgroundColor: Colors.green.shade50, child: const Icon(Icons.receipt, color: Colors.green, size: 20)),
+                title: Text(inv.customer, style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text("PKR ${inv.amount.toStringAsFixed(0)}"),
+                trailing: Text(inv.syncStatus, style: TextStyle(color: inv.syncStatus == "Synced" ? Colors.green : Colors.orange, fontSize: 12)),
+              ),
+            )).toList()
         ],
       ),
     );
@@ -348,11 +386,7 @@ class DashboardView extends StatelessWidget {
 
   Widget _buildStatCard(String title, String value, IconData icon, Color color) {
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -361,20 +395,20 @@ class DashboardView extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
-                child: Icon(icon, color: color),
-              ),
+              Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: color)),
               Icon(Icons.more_horiz, color: Colors.grey.shade400),
             ],
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-              Text(title, style: TextStyle(color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
-            ],
+          const SizedBox(height: 10),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FittedBox(fit: BoxFit.scaleDown, child: Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold))),
+                Text(title, style: TextStyle(color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
+              ],
+            ),
           )
         ],
       ),
@@ -402,43 +436,60 @@ class InvoiceListView extends StatelessWidget {
           Expanded(
             child: Card(
               child: LayoutBuilder(
-                  builder: (context, constraints) {
+                builder: (context, constraints) {
+                  if (constraints.maxWidth < 800) {
+                    return ListView.builder(
+                      itemCount: invoices.length,
+                      itemBuilder: (context, index) {
+                        final inv = invoices[index];
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            leading: CircleAvatar(backgroundColor: Colors.green.shade50, child: const Icon(Icons.receipt, color: Colors.green)),
+                            title: Text(inv.customer, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text("#${inv.id} • ${inv.date}"),
+                              const SizedBox(height: 4),
+                              Text("PKR ${inv.amount.toStringAsFixed(0)}", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)),
+                            ]),
+                            trailing: Text(inv.syncStatus, style: TextStyle(fontSize: 10, color: inv.syncStatus == "Synced" ? Colors.green.shade800 : Colors.orange.shade800)),
+                          ),
+                        );
+                      },
+                    );
+                  } else {
                     return SingleChildScrollView(
                       scrollDirection: Axis.vertical,
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                          child: DataTable(
-                            headingRowColor: MaterialStateProperty.all(Colors.grey.shade50),
-                            columns: const [
-                              DataColumn(label: Text("Invoice ID", style: TextStyle(fontWeight: FontWeight.bold))),
-                              DataColumn(label: Text("Customer", style: TextStyle(fontWeight: FontWeight.bold))),
-                              DataColumn(label: Text("Code", style: TextStyle(fontWeight: FontWeight.bold))),
-                              DataColumn(label: Text("Date", style: TextStyle(fontWeight: FontWeight.bold))),
-                              DataColumn(label: Text("Amount", style: TextStyle(fontWeight: FontWeight.bold))),
-                              DataColumn(label: Text("Status", style: TextStyle(fontWeight: FontWeight.bold))),
-                            ],
-                            rows: invoices.map((inv) => DataRow(cells: [
-                              DataCell(Text(inv.id, style: const TextStyle(fontWeight: FontWeight.w600))),
-                              DataCell(Text(inv.customer)),
-                              DataCell(Text(inv.code)),
-                              DataCell(Text(inv.date)),
-                              DataCell(Text("PKR ${inv.amount.toStringAsFixed(2)}")),
-                              DataCell(Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: inv.syncStatus == "Synced" ? Colors.green.shade100 : Colors.orange.shade100,
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text(inv.syncStatus, style: TextStyle(color: inv.syncStatus == "Synced" ? Colors.green.shade800 : Colors.orange.shade800, fontSize: 12, fontWeight: FontWeight.bold)),
-                              )),
-                            ])).toList(),
-                          ),
+                      child: SizedBox(
+                        width: constraints.maxWidth,
+                        child: DataTable(
+                          headingRowColor: MaterialStateProperty.all(Colors.grey.shade50),
+                          columns: const [
+                            DataColumn(label: Text("Invoice ID", style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text("Customer", style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text("Code", style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text("Date", style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text("Amount", style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text("Status", style: TextStyle(fontWeight: FontWeight.bold))),
+                          ],
+                          rows: invoices.map((inv) => DataRow(cells: [
+                            DataCell(Text(inv.id, style: const TextStyle(fontWeight: FontWeight.w600))),
+                            DataCell(Text(inv.customer)),
+                            DataCell(Text(inv.code)),
+                            DataCell(Text(inv.date)),
+                            DataCell(Text("PKR ${inv.amount.toStringAsFixed(2)}")),
+                            DataCell(Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(color: inv.syncStatus == "Synced" ? Colors.green.shade100 : Colors.orange.shade100, borderRadius: BorderRadius.circular(20)),
+                              child: Text(inv.syncStatus, style: TextStyle(color: inv.syncStatus == "Synced" ? Colors.green.shade800 : Colors.orange.shade800, fontSize: 12, fontWeight: FontWeight.bold)),
+                            )),
+                          ])).toList(),
                         ),
                       ),
                     );
                   }
+                },
               ),
             ),
           )
@@ -468,8 +519,6 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
   String? _paymentTerms;
 
   List<Map<String, dynamic>> _invoiceItems = [];
-  double _subTotal = 0.0;
-  double _totalTax = 0.0;
   double _grandTotal = 0.0;
   bool _isSaving = false;
 
@@ -482,23 +531,8 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
 
   void _addNewItemRow() {
     setState(() {
-      _invoiceItems.add({
-        "code": TextEditingController(),
-        "name": TextEditingController(),
-        "unit": TextEditingController(),
-        "qty": TextEditingController(text: "1"),
-        "rate": TextEditingController(text: "0"),
-        "tax_p": TextEditingController(text: "0"),
-        "amount": 0.0,
-        "tax_amt": 0.0
-      });
+      _invoiceItems.add({"code": TextEditingController(), "name": TextEditingController(), "unit": TextEditingController(), "qty": TextEditingController(text: "1"), "rate": TextEditingController(text: "0"), "tax_p": TextEditingController(text: "0"), "amount": 0.0, "tax_amt": 0.0});
     });
-  }
-
-  void _removeRow(int index) {
-    if (_invoiceItems.length > 1) {
-      setState(() { _invoiceItems.removeAt(index); _calculateTotals(); });
-    }
   }
 
   void _calculateTotals() {
@@ -510,33 +544,81 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
       double taxP = double.tryParse(item['tax_p'].text) ?? 0.0;
       double lineAmt = qty * rate;
       double taxAmt = lineAmt * (taxP / 100);
-
       item['amount'] = lineAmt;
       item['tax_amt'] = taxAmt;
       tempSub += lineAmt;
       tempTax += taxAmt;
     }
-    setState(() { _subTotal = tempSub; _totalTax = tempTax; _grandTotal = tempSub + tempTax; });
+    setState(() => _grandTotal = tempSub + tempTax);
   }
 
   Future<void> _submitInvoice() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isSaving = true);
-      await SyncService.saveInvoice(Invoice(
-        id: _invoiceIdCtrl.text,
-        customer: _custNameCtrl.text,
-        code: _custCodeCtrl.text,
-        date: _dateCtrl.text,
-        amount: _grandTotal,
-      ));
+      await SyncService.saveInvoice(Invoice(id: _invoiceIdCtrl.text, customer: _custNameCtrl.text, code: _custCodeCtrl.text, date: _dateCtrl.text, amount: _grandTotal));
       setState(() => _isSaving = false);
       widget.onInvoiceSaved();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invoice Saved Successfully!"), backgroundColor: Colors.green));
     }
   }
 
+  // --- FULL SCREEN ITEM EDITOR (WITH ALL FIELDS RESTORED) ---
+  void _openFullScreenItemEditor() {
+    Navigator.of(context).push(MaterialPageRoute(builder: (context) => Scaffold(
+        appBar: AppBar(title: const Text("Manage Invoice Items")),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(children: [
+            ...List.generate(_invoiceItems.length, (index) {
+              final item = _invoiceItems[index];
+              return Card(
+                margin: const EdgeInsets.only(bottom: 20),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(children: [
+                    Row(children: [Expanded(child: _buildTextField("Code", item['code'])), const SizedBox(width: 10), Expanded(child: _buildTextField("Unit", item['unit']))]),
+                    const SizedBox(height: 10),
+                    _buildTextField("Item Name", item['name']),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      Expanded(child: _buildTableInput(item['rate'], "Rate", isNum: true, onChange: (v) => _calculateTotals())),
+                      const SizedBox(width: 10),
+                      Expanded(child: _buildTableInput(item['qty'], "Qty", isNum: true, onChange: (v) => _calculateTotals())),
+                    ]),
+                    const SizedBox(height: 10),
+                    // ADDED BACK: Tax Fields & Line Amount
+                    Row(children: [
+                      Expanded(child: _buildTableInput(item['tax_p'], "Tax %", isNum: true, onChange: (v) => _calculateTotals())),
+                      const SizedBox(width: 10),
+                      Expanded(child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+                        child: Text("Tax: ${item['tax_amt'].toStringAsFixed(1)}", textAlign: TextAlign.center),
+                      )),
+                    ]),
+                    const SizedBox(height: 10),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      const Text("Line Total:", style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text("PKR ${item['amount'].toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green)),
+                    ]),
+                    const SizedBox(height: 5),
+                    Align(alignment: Alignment.centerRight, child: IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () { setState(() { if(_invoiceItems.length > 1) _invoiceItems.removeAt(index); }); Navigator.pop(context); _openFullScreenItemEditor(); }))
+                  ]),
+                ),
+              );
+            }),
+            ElevatedButton.icon(onPressed: () { _addNewItemRow(); Navigator.pop(context); _openFullScreenItemEditor(); }, icon: const Icon(Icons.add), label: const Text("Add Another Item")),
+            const SizedBox(height: 20),
+            ElevatedButton(onPressed: () => Navigator.pop(context), style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 50)), child: const Text("DONE & RETURN"))
+          ]),
+        )
+    )));
+  }
+
   @override
   Widget build(BuildContext context) {
+    bool isMobile = MediaQuery.of(context).size.width < 700;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Center(
@@ -550,46 +632,15 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                 const Text("New Sales Invoice", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 20),
 
-                // HEADER INFO
+                // HEADER
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text("Customer Details", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        Row(children: [Expanded(child: _buildTextField("Invoice ID", _invoiceIdCtrl, readOnly: true)), const SizedBox(width: 15), Expanded(child: _buildTextField("Date", _dateCtrl))]),
                         const SizedBox(height: 15),
-                        LayoutBuilder(builder: (context, constraints) {
-                          bool isWide = constraints.maxWidth > 700;
-                          return Column(
-                            children: [
-                              Flex(
-                                direction: isWide ? Axis.horizontal : Axis.vertical,
-                                children: [
-                                  Expanded(flex: isWide?1:0, child: _buildTextField("Invoice ID", _invoiceIdCtrl, readOnly: true)),
-                                  SizedBox(width: isWide?15:0, height: isWide?0:15),
-                                  Expanded(flex: isWide?1:0, child: _buildTextField("Date", _dateCtrl, icon: Icons.calendar_today)),
-                                  SizedBox(width: isWide?15:0, height: isWide?0:15),
-                                  Expanded(flex: isWide?1:0, child: DropdownButtonFormField<String>(
-                                    decoration: const InputDecoration(labelText: "Payment Terms"),
-                                    value: _paymentTerms,
-                                    items: ["Cash", "Net 15", "Net 30"].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                                    onChanged: (v) => setState(() => _paymentTerms = v),
-                                  )),
-                                ],
-                              ),
-                              const SizedBox(height: 15),
-                              Flex(
-                                direction: isWide ? Axis.horizontal : Axis.vertical,
-                                children: [
-                                  Expanded(flex: isWide?1:0, child: _buildTextField("Customer Code", _custCodeCtrl)),
-                                  SizedBox(width: isWide?15:0, height: isWide?0:15),
-                                  Expanded(flex: isWide?2:0, child: _buildTextField("Customer Name", _custNameCtrl)),
-                                ],
-                              )
-                            ],
-                          );
-                        }),
+                        Row(children: [Expanded(child: _buildTextField("Code", _custCodeCtrl)), const SizedBox(width: 15), Expanded(flex: 2, child: _buildTextField("Customer Name", _custNameCtrl))])
                       ],
                     ),
                   ),
@@ -597,7 +648,7 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
 
                 const SizedBox(height: 20),
 
-                // ITEMS TABLE
+                // ITEMS
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -605,16 +656,27 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                          const Text("Items & Products", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                          ElevatedButton.icon(onPressed: _addNewItemRow, icon: const Icon(Icons.add, size: 16), label: const Text("Add Item"))
+                          const Text("Items", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          if(!isMobile) ElevatedButton.icon(onPressed: _addNewItemRow, icon: const Icon(Icons.add, size: 16), label: const Text("Add Item"))
                         ]),
                         const Divider(height: 30),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(minWidth: 1000),
-                            child: Column(
-                              children: [
+
+                        if (isMobile)
+                          Column(children: [
+                            Container(
+                              padding: const EdgeInsets.all(15),
+                              decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+                              child: Center(child: Text("${_invoiceItems.length} items added. Total: ${_grandTotal.toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold))),
+                            ),
+                            const SizedBox(height: 15),
+                            SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: _openFullScreenItemEditor, icon: const Icon(Icons.edit), label: const Text("MANAGE ITEMS (FULL SCREEN)")))
+                          ])
+                        else
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(minWidth: 1000),
+                              child: Column(children: [
                                 Container(
                                   padding: const EdgeInsets.only(bottom: 10),
                                   child: const Row(children: [
@@ -630,67 +692,35 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                                 ),
                                 ...List.generate(_invoiceItems.length, (index) {
                                   final item = _invoiceItems[index];
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 10),
-                                    child: Row(children: [
-                                      SizedBox(width: 80, child: _buildTableInput(item['code'], "")), SizedBox(width: 10),
-                                      SizedBox(width: 200, child: _buildTableInput(item['name'], "")), SizedBox(width: 10),
-                                      SizedBox(width: 80, child: _buildTableInput(item['unit'], "Kg")), SizedBox(width: 10),
-                                      SizedBox(width: 100, child: _buildTableInput(item['rate'], "0", isNum: true, onChange: (v) => _calculateTotals())), SizedBox(width: 10),
-                                      SizedBox(width: 80, child: _buildTableInput(item['qty'], "1", isNum: true, onChange: (v) => _calculateTotals())), SizedBox(width: 10),
-                                      SizedBox(width: 100, child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)), child: Text(item['amount'].toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.bold)))), SizedBox(width: 10),
-                                      SizedBox(width: 60, child: _buildTableInput(item['tax_p'], "0", isNum: true, onChange: (v) => _calculateTotals())), SizedBox(width: 10),
-                                      SizedBox(width: 80, child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)), child: Text(item['tax_amt'].toStringAsFixed(2)))),
-                                      IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red), onPressed: () => _removeRow(index)),
-                                    ]),
-                                  );
-                                })
-                              ],
+                                  return Padding(padding: const EdgeInsets.only(bottom: 10), child: Row(children: [
+                                    SizedBox(width: 80, child: _buildTextField("Code", item['code'])), const SizedBox(width: 10),
+                                    SizedBox(width: 200, child: _buildTextField("Item", item['name'])), const SizedBox(width: 10),
+                                    SizedBox(width: 80, child: _buildTextField("Unit", item['unit'])), const SizedBox(width: 10),
+                                    SizedBox(width: 100, child: _buildTableInput(item['rate'], "Rate", isNum: true, onChange: (v) => _calculateTotals())), const SizedBox(width: 10),
+                                    SizedBox(width: 80, child: _buildTableInput(item['qty'], "Qty", isNum: true, onChange: (v) => _calculateTotals())), const SizedBox(width: 10),
+                                    SizedBox(width: 100, child: Text(item['amount'].toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.bold))), const SizedBox(width: 10),
+                                    SizedBox(width: 60, child: _buildTableInput(item['tax_p'], "Tax", isNum: true, onChange: (v) => _calculateTotals())), const SizedBox(width: 10),
+                                    SizedBox(width: 80, child: Text(item['tax_amt'].toStringAsFixed(2))),
+                                  ]));
+                                })]),
                             ),
-                          ),
-                        )
+                          )
                       ],
                     ),
                   ),
                 ),
 
                 const SizedBox(height: 20),
-
-                // FOOTER
                 Align(
                   alignment: Alignment.centerRight,
                   child: Container(
-                    width: 300,
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-                    child: Column(
-                      children: [
-                        _buildFooterRow("Sub Total", _subTotal),
-                        const SizedBox(height: 10),
-                        _buildFooterRow("Total Tax", _totalTax),
-                        const Divider(height: 30),
-                        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                          const Text("Grand Total", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          Text("PKR ${_grandTotal.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
-                        ])
-                      ],
-                    ),
+                    child: Text("Grand Total: PKR ${_grandTotal.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
                   ),
                 ),
-
-                const SizedBox(height: 30),
-
-                // SUBMIT
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: ElevatedButton.icon(
-                    onPressed: _isSaving ? null : _submitInvoice,
-                    icon: _isSaving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.check_circle),
-                    label: Text(_isSaving ? "Processing..." : "Submit Invoice"),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 18), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                  ),
-                ),
-                const SizedBox(height: 50),
+                const SizedBox(height: 20),
+                Align(alignment: Alignment.centerRight, child: ElevatedButton.icon(onPressed: _isSaving ? null : _submitInvoice, icon: const Icon(Icons.check), label: const Text("Submit Invoice"), style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, padding: const EdgeInsets.all(20))))
               ],
             ),
           ),
@@ -699,15 +729,10 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
     );
   }
 
-  Widget _buildFooterRow(String label, double val) {
-    return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label, style: TextStyle(color: Colors.grey.shade600)), Text(val.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.bold))]);
-  }
-
   Widget _buildTextField(String label, TextEditingController ctrl, {bool readOnly = false, IconData? icon}) {
     return TextFormField(controller: ctrl, readOnly: readOnly, decoration: InputDecoration(labelText: label, suffixIcon: icon != null ? Icon(icon) : null));
   }
-
   Widget _buildTableInput(TextEditingController ctrl, String hint, {bool isNum = false, Function(String)? onChange}) {
-    return TextFormField(controller: ctrl, onChanged: onChange, keyboardType: isNum ? TextInputType.number : TextInputType.text, inputFormatters: isNum ? [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))] : [], decoration: InputDecoration(hintText: hint, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12), isDense: true));
+    return TextFormField(controller: ctrl, onChanged: onChange, keyboardType: isNum ? TextInputType.number : TextInputType.text, inputFormatters: isNum ? [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))] : [], decoration: InputDecoration(labelText: hint, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12), isDense: true));
   }
 }
