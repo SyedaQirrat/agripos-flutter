@@ -59,7 +59,6 @@ class Invoice {
   });
 }
 
-// NEW: Product Model
 class Product {
   final String code;
   final String name;
@@ -72,14 +71,11 @@ class Product {
 
 class SyncService {
   static bool isOnline = true;
-
-  // Invoice Data
   static final List<Invoice> _localInvoices = [
     Invoice(id: "INV-1001", customer: "Ali Farms", code: "C001", date: "2024-11-20", amount: 5000),
     Invoice(id: "INV-1002", customer: "Green Acres", code: "C002", date: "2024-11-21", amount: 12500, syncStatus: "Pending"),
   ];
 
-  // NEW: Product Data (Mock Database)
   static final List<Product> _localProducts = [
     Product(code: "P001", name: "Urea Fertilizer 50kg", unit: "Bag", price: 4500, stock: 150),
     Product(code: "P002", name: "DAP Fertilizer", unit: "Bag", price: 12000, stock: 45),
@@ -88,7 +84,7 @@ class SyncService {
   ];
 
   static List<Invoice> getInvoices() => _localInvoices;
-  static List<Product> getProducts() => _localProducts; // Getter for products
+  static List<Product> getProducts() => _localProducts;
 
   static int getPendingCount() => _localInvoices.where((i) => i.syncStatus == "Pending").length;
   static double getTotalSales() => _localInvoices.fold(0, (sum, item) => sum + item.amount);
@@ -104,7 +100,6 @@ class SyncService {
     }
   }
 
-  // NEW: Save Product
   static void addProduct(Product p) {
     _localProducts.add(p);
   }
@@ -185,7 +180,7 @@ class LoginScreen extends StatelessWidget {
 }
 
 // ==========================================
-// 3. MAIN LAYOUT (UPDATED NAVIGATION)
+// 3. MAIN LAYOUT
 // ==========================================
 class MainLayoutShell extends StatefulWidget {
   const MainLayoutShell({super.key});
@@ -212,10 +207,10 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
   Widget _getCurrentView() {
     switch (_selectedIndex) {
       case 0: return DashboardView(
-        onNewSale: () => setState(() => _selectedIndex = 3), // Updated index for Sale
-        onViewAllInvoices: () => setState(() => _selectedIndex = 2), // Updated index for List
+        onNewSale: () => setState(() => _selectedIndex = 3),
+        onViewAllInvoices: () => setState(() => _selectedIndex = 2),
       );
-      case 1: return const InventoryView(); // NEW: Inventory Screen
+      case 1: return const InventoryView();
       case 2: return const InvoiceListView();
       case 3: return InvoiceCreateView(onInvoiceSaved: () => setState(() => _selectedIndex = 2));
       default: return DashboardView(onNewSale: () => setState(() => _selectedIndex = 3), onViewAllInvoices: () => setState(() => _selectedIndex = 2));
@@ -279,7 +274,7 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
               groupAlignment: -0.9,
               destinations: const [
                 NavigationRailDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: Text('Overview')),
-                NavigationRailDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: Text('Inventory')), // NEW
+                NavigationRailDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: Text('Inventory')),
                 NavigationRailDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: Text('Invoices')),
                 NavigationRailDestination(icon: Icon(Icons.add_circle_outline), selectedIcon: Icon(Icons.add_circle), label: Text('New Sale')),
               ],
@@ -293,7 +288,7 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
         onDestinationSelected: (int index) => setState(() => _selectedIndex = index),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Overview'),
-          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: 'Inventory'), // NEW
+          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: 'Inventory'),
           NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Invoices'),
           NavigationDestination(icon: Icon(Icons.add_circle_outline), selectedIcon: Icon(Icons.add_circle), label: 'New Sale'),
         ],
@@ -303,7 +298,7 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
 }
 
 // ==========================================
-// 4. DASHBOARD VIEW (PRESERVED FIXES)
+// 4. DASHBOARD VIEW (PRESERVED)
 // ==========================================
 class DashboardView extends StatelessWidget {
   final VoidCallback onNewSale;
@@ -378,7 +373,6 @@ class DashboardView extends StatelessWidget {
             crossAxisCount: isDesktop ? 4 : 2,
             crossAxisSpacing: 20,
             mainAxisSpacing: 20,
-            // 4PX FIX: 0.85 ratio for mobile prevents overflow
             childAspectRatio: isMobile ? 0.85 : 1.2,
             children: [
               _buildStatCard("Total Sales", "PKR ${totalSales.toStringAsFixed(0)}", Icons.attach_money, Colors.blue),
@@ -452,7 +446,7 @@ class DashboardView extends StatelessWidget {
 }
 
 // ==========================================
-// 5. INVENTORY VIEW (NEW MODULE)
+// 5. INVENTORY VIEW (FIXED HEADER OVERFLOW)
 // ==========================================
 class InventoryView extends StatefulWidget {
   const InventoryView({super.key});
@@ -462,7 +456,6 @@ class InventoryView extends StatefulWidget {
 }
 
 class _InventoryViewState extends State<InventoryView> {
-  // Simple dialog to add product
   void _showAddProductDialog() {
     final nameCtrl = TextEditingController();
     final codeCtrl = TextEditingController();
@@ -521,8 +514,12 @@ class _InventoryViewState extends State<InventoryView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // FIX: Changed Row to Wrap to prevent button overflow on mobile
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 10,
+            runSpacing: 10,
             children: [
               const Text("Inventory & Stock", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
               ElevatedButton.icon(
@@ -538,9 +535,7 @@ class _InventoryViewState extends State<InventoryView> {
             child: Card(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  // ADAPTIVE VIEW FOR INVENTORY
                   if (constraints.maxWidth < 800) {
-                    // Mobile: List of Stock Cards
                     return ListView.builder(
                       itemCount: products.length,
                       itemBuilder: (context, index) {
@@ -567,7 +562,6 @@ class _InventoryViewState extends State<InventoryView> {
                       },
                     );
                   } else {
-                    // Desktop: Data Table
                     return SingleChildScrollView(
                       scrollDirection: Axis.vertical,
                       child: SizedBox(
@@ -780,6 +774,7 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                       Expanded(child: _buildTableInput(item['qty'], "Qty", isNum: true, onChange: (v) => _calculateTotals())),
                     ]),
                     const SizedBox(height: 10),
+                    // RESTORED FIELDS: Tax & Line Total
                     Row(children: [
                       Expanded(child: _buildTableInput(item['tax_p'], "Tax %", isNum: true, onChange: (v) => _calculateTotals())),
                       const SizedBox(width: 10),
