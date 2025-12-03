@@ -59,31 +59,59 @@ class Invoice {
   });
 }
 
+// NEW: Product Model
+class Product {
+  final String code;
+  final String name;
+  final String unit;
+  final double price;
+  final int stock;
+
+  Product({required this.code, required this.name, required this.unit, required this.price, required this.stock});
+}
+
 class SyncService {
   static bool isOnline = true;
-  static final List<Invoice> _localDatabase = [
+
+  // Invoice Data
+  static final List<Invoice> _localInvoices = [
     Invoice(id: "INV-1001", customer: "Ali Farms", code: "C001", date: "2024-11-20", amount: 5000),
     Invoice(id: "INV-1002", customer: "Green Acres", code: "C002", date: "2024-11-21", amount: 12500, syncStatus: "Pending"),
   ];
 
-  static List<Invoice> getInvoices() => _localDatabase;
-  static int getPendingCount() => _localDatabase.where((i) => i.syncStatus == "Pending").length;
-  static double getTotalSales() => _localDatabase.fold(0, (sum, item) => sum + item.amount);
+  // NEW: Product Data (Mock Database)
+  static final List<Product> _localProducts = [
+    Product(code: "P001", name: "Urea Fertilizer 50kg", unit: "Bag", price: 4500, stock: 150),
+    Product(code: "P002", name: "DAP Fertilizer", unit: "Bag", price: 12000, stock: 45),
+    Product(code: "P003", name: "Pesticide Spray X", unit: "Ltr", price: 1500, stock: 300),
+    Product(code: "P004", name: "Wheat Seeds (Certified)", unit: "Kg", price: 250, stock: 5000),
+  ];
+
+  static List<Invoice> getInvoices() => _localInvoices;
+  static List<Product> getProducts() => _localProducts; // Getter for products
+
+  static int getPendingCount() => _localInvoices.where((i) => i.syncStatus == "Pending").length;
+  static double getTotalSales() => _localInvoices.fold(0, (sum, item) => sum + item.amount);
 
   static Future<void> saveInvoice(Invoice invoice) async {
     if (isOnline) {
       await Future.delayed(const Duration(seconds: 1));
       invoice.syncStatus = "Synced";
-      _localDatabase.add(invoice);
+      _localInvoices.add(invoice);
     } else {
       invoice.syncStatus = "Pending";
-      _localDatabase.add(invoice);
+      _localInvoices.add(invoice);
     }
+  }
+
+  // NEW: Save Product
+  static void addProduct(Product p) {
+    _localProducts.add(p);
   }
 
   static Future<void> syncPendingItems(Function(String) onProgress) async {
     if (!isOnline) return;
-    List<Invoice> pendingItems = _localDatabase.where((i) => i.syncStatus == "Pending").toList();
+    List<Invoice> pendingItems = _localInvoices.where((i) => i.syncStatus == "Pending").toList();
     for (var invoice in pendingItems) {
       onProgress("Syncing ${invoice.id}...");
       await Future.delayed(const Duration(milliseconds: 500));
@@ -157,7 +185,7 @@ class LoginScreen extends StatelessWidget {
 }
 
 // ==========================================
-// 3. MAIN LAYOUT
+// 3. MAIN LAYOUT (UPDATED NAVIGATION)
 // ==========================================
 class MainLayoutShell extends StatefulWidget {
   const MainLayoutShell({super.key});
@@ -184,12 +212,13 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
   Widget _getCurrentView() {
     switch (_selectedIndex) {
       case 0: return DashboardView(
-        onNewSale: () => setState(() => _selectedIndex = 2),
-        onViewAllInvoices: () => setState(() => _selectedIndex = 1),
+        onNewSale: () => setState(() => _selectedIndex = 3), // Updated index for Sale
+        onViewAllInvoices: () => setState(() => _selectedIndex = 2), // Updated index for List
       );
-      case 1: return const InvoiceListView();
-      case 2: return InvoiceCreateView(onInvoiceSaved: () => setState(() => _selectedIndex = 1));
-      default: return DashboardView(onNewSale: () => setState(() => _selectedIndex = 2), onViewAllInvoices: () => setState(() => _selectedIndex = 1));
+      case 1: return const InventoryView(); // NEW: Inventory Screen
+      case 2: return const InvoiceListView();
+      case 3: return InvoiceCreateView(onInvoiceSaved: () => setState(() => _selectedIndex = 2));
+      default: return DashboardView(onNewSale: () => setState(() => _selectedIndex = 3), onViewAllInvoices: () => setState(() => _selectedIndex = 2));
     }
   }
 
@@ -250,6 +279,7 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
               groupAlignment: -0.9,
               destinations: const [
                 NavigationRailDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: Text('Overview')),
+                NavigationRailDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: Text('Inventory')), // NEW
                 NavigationRailDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: Text('Invoices')),
                 NavigationRailDestination(icon: Icon(Icons.add_circle_outline), selectedIcon: Icon(Icons.add_circle), label: Text('New Sale')),
               ],
@@ -263,6 +293,7 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
         onDestinationSelected: (int index) => setState(() => _selectedIndex = index),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Overview'),
+          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: 'Inventory'), // NEW
           NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Invoices'),
           NavigationDestination(icon: Icon(Icons.add_circle_outline), selectedIcon: Icon(Icons.add_circle), label: 'New Sale'),
         ],
@@ -272,7 +303,7 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
 }
 
 // ==========================================
-// 4. DASHBOARD VIEW (FIXED 4PX OVERFLOW)
+// 4. DASHBOARD VIEW (PRESERVED FIXES)
 // ==========================================
 class DashboardView extends StatelessWidget {
   final VoidCallback onNewSale;
@@ -347,7 +378,7 @@ class DashboardView extends StatelessWidget {
             crossAxisCount: isDesktop ? 4 : 2,
             crossAxisSpacing: 20,
             mainAxisSpacing: 20,
-            // --- FIX IS HERE: Lower aspect ratio for mobile means TALLER cards ---
+            // 4PX FIX: 0.85 ratio for mobile prevents overflow
             childAspectRatio: isMobile ? 0.85 : 1.2,
             children: [
               _buildStatCard("Total Sales", "PKR ${totalSales.toStringAsFixed(0)}", Icons.attach_money, Colors.blue),
@@ -405,7 +436,11 @@ class DashboardView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                FittedBox(fit: BoxFit.scaleDown, child: Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold))),
+                FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold))
+                ),
                 Text(title, style: TextStyle(color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
               ],
             ),
@@ -417,7 +452,165 @@ class DashboardView extends StatelessWidget {
 }
 
 // ==========================================
-// 5. INVOICE LIST VIEW
+// 5. INVENTORY VIEW (NEW MODULE)
+// ==========================================
+class InventoryView extends StatefulWidget {
+  const InventoryView({super.key});
+
+  @override
+  State<InventoryView> createState() => _InventoryViewState();
+}
+
+class _InventoryViewState extends State<InventoryView> {
+  // Simple dialog to add product
+  void _showAddProductDialog() {
+    final nameCtrl = TextEditingController();
+    final codeCtrl = TextEditingController();
+    final priceCtrl = TextEditingController();
+    final stockCtrl = TextEditingController();
+
+    showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text("Add New Product"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: codeCtrl, decoration: const InputDecoration(labelText: "Product Code")),
+                const SizedBox(height: 10),
+                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Product Name")),
+                const SizedBox(height: 10),
+                TextField(controller: priceCtrl, decoration: const InputDecoration(labelText: "Price (PKR)"), keyboardType: TextInputType.number),
+                const SizedBox(height: 10),
+                TextField(controller: stockCtrl, decoration: const InputDecoration(labelText: "Opening Stock"), keyboardType: TextInputType.number),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+            ElevatedButton(
+              onPressed: () {
+                if(nameCtrl.text.isNotEmpty) {
+                  setState(() {
+                    SyncService.addProduct(Product(
+                        code: codeCtrl.text,
+                        name: nameCtrl.text,
+                        unit: "Unit",
+                        price: double.tryParse(priceCtrl.text) ?? 0,
+                        stock: int.tryParse(stockCtrl.text) ?? 0
+                    ));
+                  });
+                  Navigator.pop(context);
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+              child: const Text("Save Product"),
+            )
+          ],
+        )
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    List<Product> products = SyncService.getProducts();
+
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Inventory & Stock", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+              ElevatedButton.icon(
+                onPressed: _showAddProductDialog,
+                icon: const Icon(Icons.add),
+                label: const Text("Add Product"),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+              )
+            ],
+          ),
+          const SizedBox(height: 20),
+          Expanded(
+            child: Card(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // ADAPTIVE VIEW FOR INVENTORY
+                  if (constraints.maxWidth < 800) {
+                    // Mobile: List of Stock Cards
+                    return ListView.builder(
+                      itemCount: products.length,
+                      itemBuilder: (context, index) {
+                        final p = products[index];
+                        return Card(
+                          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                                backgroundColor: Colors.blue.shade50,
+                                child: Text(p.code.substring(0, 1), style: const TextStyle(color: Colors.blue))
+                            ),
+                            title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Text("Code: ${p.code} • Unit: ${p.unit}"),
+                            trailing: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text("${p.stock} in stock", style: TextStyle(fontWeight: FontWeight.bold, color: p.stock < 50 ? Colors.red : Colors.green)),
+                                Text("PKR ${p.price}", style: const TextStyle(fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  } else {
+                    // Desktop: Data Table
+                    return SingleChildScrollView(
+                      scrollDirection: Axis.vertical,
+                      child: SizedBox(
+                        width: constraints.maxWidth,
+                        child: DataTable(
+                          headingRowColor: MaterialStateProperty.all(Colors.grey.shade50),
+                          columns: const [
+                            DataColumn(label: Text("Code", style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text("Product Name", style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text("Unit", style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text("Price", style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text("Current Stock", style: TextStyle(fontWeight: FontWeight.bold))),
+                          ],
+                          rows: products.map((p) => DataRow(cells: [
+                            DataCell(Text(p.code, style: const TextStyle(fontWeight: FontWeight.bold))),
+                            DataCell(Text(p.name)),
+                            DataCell(Text(p.unit)),
+                            DataCell(Text(p.price.toStringAsFixed(0))),
+                            DataCell(Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                  color: p.stock < 50 ? Colors.red.shade50 : Colors.green.shade50,
+                                  borderRadius: BorderRadius.circular(12)
+                              ),
+                              child: Text("${p.stock}", style: TextStyle(fontWeight: FontWeight.bold, color: p.stock < 50 ? Colors.red : Colors.green)),
+                            )),
+                          ])).toList(),
+                        ),
+                      ),
+                    );
+                  }
+                },
+              ),
+            ),
+          )
+        ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 6. INVOICE LIST VIEW
 // ==========================================
 class InvoiceListView extends StatelessWidget {
   const InvoiceListView({super.key});
@@ -443,17 +636,19 @@ class InvoiceListView extends StatelessWidget {
                       itemBuilder: (context, index) {
                         final inv = invoices[index];
                         return Card(
-                          margin: const EdgeInsets.only(bottom: 12),
+                          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                           child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             leading: CircleAvatar(backgroundColor: Colors.green.shade50, child: const Icon(Icons.receipt, color: Colors.green)),
                             title: Text(inv.customer, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text("#${inv.id} • ${inv.date}"),
-                              const SizedBox(height: 4),
-                              Text("PKR ${inv.amount.toStringAsFixed(0)}", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)),
-                            ]),
-                            trailing: Text(inv.syncStatus, style: TextStyle(fontSize: 10, color: inv.syncStatus == "Synced" ? Colors.green.shade800 : Colors.orange.shade800)),
+                            subtitle: Text("#${inv.id} • ${inv.date}"),
+                            trailing: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text("PKR ${inv.amount.toStringAsFixed(0)}", style: const TextStyle(fontWeight: FontWeight.bold)),
+                                Text(inv.syncStatus, style: TextStyle(fontSize: 10, color: inv.syncStatus == "Synced" ? Colors.green : Colors.orange)),
+                              ],
+                            ),
                           ),
                         );
                       },
@@ -500,7 +695,7 @@ class InvoiceListView extends StatelessWidget {
 }
 
 // ==========================================
-// 6. INVOICE CREATE VIEW
+// 7. INVOICE CREATE VIEW
 // ==========================================
 class InvoiceCreateView extends StatefulWidget {
   final VoidCallback onInvoiceSaved;
@@ -562,7 +757,6 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
     }
   }
 
-  // --- FULL SCREEN ITEM EDITOR (WITH ALL FIELDS RESTORED) ---
   void _openFullScreenItemEditor() {
     Navigator.of(context).push(MaterialPageRoute(builder: (context) => Scaffold(
         appBar: AppBar(title: const Text("Manage Invoice Items")),
@@ -586,7 +780,6 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                       Expanded(child: _buildTableInput(item['qty'], "Qty", isNum: true, onChange: (v) => _calculateTotals())),
                     ]),
                     const SizedBox(height: 10),
-                    // ADDED BACK: Tax Fields & Line Amount
                     Row(children: [
                       Expanded(child: _buildTableInput(item['tax_p'], "Tax %", isNum: true, onChange: (v) => _calculateTotals())),
                       const SizedBox(width: 10),
@@ -631,8 +824,6 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
               children: [
                 const Text("New Sales Invoice", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 20),
-
-                // HEADER
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -645,10 +836,7 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 20),
-
-                // ITEMS
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -660,7 +848,6 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                           if(!isMobile) ElevatedButton.icon(onPressed: _addNewItemRow, icon: const Icon(Icons.add, size: 16), label: const Text("Add Item"))
                         ]),
                         const Divider(height: 30),
-
                         if (isMobile)
                           Column(children: [
                             Container(
@@ -709,7 +896,6 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 20),
                 Align(
                   alignment: Alignment.centerRight,
