@@ -47,6 +47,8 @@ class Invoice {
   final String code;
   final String date;
   final double amount;
+  final double discount;
+  final List<Map<String, dynamic>> items;
   String syncStatus;
 
   Invoice({
@@ -55,6 +57,8 @@ class Invoice {
     required this.code,
     required this.date,
     required this.amount,
+    this.discount = 0.0,
+    this.items = const [],
     this.syncStatus = "Synced",
   });
 }
@@ -71,9 +75,30 @@ class Product {
 
 class SyncService {
   static bool isOnline = true;
+
   static final List<Invoice> _localInvoices = [
-    Invoice(id: "INV-1001", customer: "Ali Farms", code: "C001", date: "2024-11-20", amount: 5000),
-    Invoice(id: "INV-1002", customer: "Green Acres", code: "C002", date: "2024-11-21", amount: 12500, syncStatus: "Pending"),
+    Invoice(
+        id: "INV-1001",
+        customer: "Ali Farms",
+        code: "C001",
+        date: "2024-11-20 10:30",
+        amount: 5000,
+        discount: 0,
+        items: [
+          {"code": "P001", "name": "Urea 50kg", "unit": "Bag", "qty": "1", "rate": "4500", "amount": 4500.0, "tax_amt": 500.0}
+        ]
+    ),
+    Invoice(
+        id: "INV-1002",
+        customer: "Green Acres",
+        code: "C002",
+        date: "2024-11-21 14:15",
+        amount: 12500,
+        syncStatus: "Pending",
+        items: [
+          {"code": "P002", "name": "DAP Fertilizer", "unit": "Bag", "qty": "1", "rate": "12000", "amount": 12000.0, "tax_amt": 500.0}
+        ]
+    ),
   ];
 
   static final List<Product> _localProducts = [
@@ -298,7 +323,140 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
 }
 
 // ==========================================
-// 4. DASHBOARD VIEW (PRESERVED)
+// 4. INVOICE RECEIPT SCREEN (FIXED OVERFLOW)
+// ==========================================
+class InvoiceDetailScreen extends StatelessWidget {
+  final Invoice invoice;
+  const InvoiceDetailScreen({super.key, required this.invoice});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.grey[200],
+      appBar: AppBar(title: const Text("Invoice Details")),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 500),
+            child: Card(
+              color: Colors.white,
+              elevation: 5,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(0)),
+              child: Padding(
+                // FIX: Reduced padding from 30 to 20 to prevent overflow
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header
+                    Center(
+                      child: Column(
+                        children: [
+                          const Icon(Icons.agriculture, size: 50, color: Colors.green),
+                          const SizedBox(height: 10),
+                          const Text("AgriPOS Inc.", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                          Text("Sales Receipt", style: TextStyle(color: Colors.grey[600], letterSpacing: 1.2)),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 40, thickness: 2),
+
+                    // Info Grid (FIXED WITH EXPANDED)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text("Invoice No:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                            Text(invoice.id, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 10),
+                            Text("Customer:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                            Text(invoice.customer, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ]),
+                        ),
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                            Text("Date & Time:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                            Text(invoice.date, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 10),
+                            Text("Code:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                            Text(invoice.code, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ]),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 30),
+
+                    // Items Table
+                    const Text("Purchase Details", style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 10),
+                    Table(
+                      border: TableBorder(bottom: BorderSide(color: Colors.grey.shade300)),
+                      columnWidths: const {0: FlexColumnWidth(3), 1: FlexColumnWidth(1), 2: FlexColumnWidth(2)},
+                      children: [
+                        TableRow(
+                            decoration: BoxDecoration(color: Colors.grey[100]),
+                            children: const [
+                              Padding(padding: EdgeInsets.all(8), child: Text("Item")),
+                              Padding(padding: EdgeInsets.all(8), child: Text("Qty")),
+                              Padding(padding: EdgeInsets.all(8), child: Text("Total", textAlign: TextAlign.right)),
+                            ]
+                        ),
+                        ...invoice.items.map((item) => TableRow(
+                            children: [
+                              Padding(padding: const EdgeInsets.all(8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(item['name'], style: const TextStyle(fontWeight: FontWeight.w500)),
+                                Text("@ ${item['rate']}/${item['unit']}", style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                              ])),
+                              Padding(padding: const EdgeInsets.all(8), child: Text(item['qty'], style: const TextStyle(height: 1.5))),
+                              Padding(padding: const EdgeInsets.all(8), child: Text(item['amount'].toStringAsFixed(0), textAlign: TextAlign.right, style: const TextStyle(height: 1.5))),
+                            ]
+                        )).toList()
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Totals
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      const Text("Discount:", style: TextStyle(color: Colors.grey)),
+                      Text("- PKR ${invoice.discount.toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ]),
+                    const SizedBox(height: 5),
+                    const Divider(),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      const Text("GRAND TOTAL", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text("PKR ${invoice.amount.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
+                    ]),
+
+                    const SizedBox(height: 40),
+                    Center(
+                      child: Text("Thank you for your business!", style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[600])),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: (){},
+                        icon: const Icon(Icons.print),
+                        label: const Text("PRINT RECEIPT"),
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+                      ),
+                    )
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 5. DASHBOARD VIEW
 // ==========================================
 class DashboardView extends StatelessWidget {
   final VoidCallback onNewSale;
@@ -398,6 +556,9 @@ class DashboardView extends StatelessWidget {
             ...recentInvoices.map((inv) => Card(
               margin: const EdgeInsets.only(bottom: 10),
               child: ListTile(
+                onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => InvoiceDetailScreen(invoice: inv)));
+                },
                 leading: CircleAvatar(backgroundColor: Colors.green.shade50, child: const Icon(Icons.receipt, color: Colors.green, size: 20)),
                 title: Text(inv.customer, style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text("PKR ${inv.amount.toStringAsFixed(0)}"),
@@ -446,7 +607,7 @@ class DashboardView extends StatelessWidget {
 }
 
 // ==========================================
-// 5. INVENTORY VIEW (FIXED HEADER OVERFLOW)
+// 6. INVENTORY VIEW
 // ==========================================
 class InventoryView extends StatefulWidget {
   const InventoryView({super.key});
@@ -514,7 +675,6 @@ class _InventoryViewState extends State<InventoryView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // FIX: Changed Row to Wrap to prevent button overflow on mobile
           Wrap(
             alignment: WrapAlignment.spaceBetween,
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -604,7 +764,7 @@ class _InventoryViewState extends State<InventoryView> {
 }
 
 // ==========================================
-// 6. INVOICE LIST VIEW
+// 7. INVOICE LIST VIEW
 // ==========================================
 class InvoiceListView extends StatelessWidget {
   const InvoiceListView({super.key});
@@ -632,6 +792,9 @@ class InvoiceListView extends StatelessWidget {
                         return Card(
                           margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                           child: ListTile(
+                            onTap: () {
+                              Navigator.push(context, MaterialPageRoute(builder: (context) => InvoiceDetailScreen(invoice: inv)));
+                            },
                             leading: CircleAvatar(backgroundColor: Colors.green.shade50, child: const Icon(Icons.receipt, color: Colors.green)),
                             title: Text(inv.customer, style: const TextStyle(fontWeight: FontWeight.bold)),
                             subtitle: Text("#${inv.id} • ${inv.date}"),
@@ -654,6 +817,7 @@ class InvoiceListView extends StatelessWidget {
                         width: constraints.maxWidth,
                         child: DataTable(
                           headingRowColor: MaterialStateProperty.all(Colors.grey.shade50),
+                          showCheckboxColumn: false,
                           columns: const [
                             DataColumn(label: Text("Invoice ID", style: TextStyle(fontWeight: FontWeight.bold))),
                             DataColumn(label: Text("Customer", style: TextStyle(fontWeight: FontWeight.bold))),
@@ -662,18 +826,24 @@ class InvoiceListView extends StatelessWidget {
                             DataColumn(label: Text("Amount", style: TextStyle(fontWeight: FontWeight.bold))),
                             DataColumn(label: Text("Status", style: TextStyle(fontWeight: FontWeight.bold))),
                           ],
-                          rows: invoices.map((inv) => DataRow(cells: [
-                            DataCell(Text(inv.id, style: const TextStyle(fontWeight: FontWeight.w600))),
-                            DataCell(Text(inv.customer)),
-                            DataCell(Text(inv.code)),
-                            DataCell(Text(inv.date)),
-                            DataCell(Text("PKR ${inv.amount.toStringAsFixed(2)}")),
-                            DataCell(Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(color: inv.syncStatus == "Synced" ? Colors.green.shade100 : Colors.orange.shade100, borderRadius: BorderRadius.circular(20)),
-                              child: Text(inv.syncStatus, style: TextStyle(color: inv.syncStatus == "Synced" ? Colors.green.shade800 : Colors.orange.shade800, fontSize: 12, fontWeight: FontWeight.bold)),
-                            )),
-                          ])).toList(),
+                          rows: invoices.map((inv) => DataRow(
+                              onSelectChanged: (selected) {
+                                if (selected != null && selected) {
+                                  Navigator.push(context, MaterialPageRoute(builder: (context) => InvoiceDetailScreen(invoice: inv)));
+                                }
+                              },
+                              cells: [
+                                DataCell(Text(inv.id, style: const TextStyle(fontWeight: FontWeight.w600))),
+                                DataCell(Text(inv.customer)),
+                                DataCell(Text(inv.code)),
+                                DataCell(Text(inv.date)),
+                                DataCell(Text("PKR ${inv.amount.toStringAsFixed(2)}")),
+                                DataCell(Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(color: inv.syncStatus == "Synced" ? Colors.green.shade100 : Colors.orange.shade100, borderRadius: BorderRadius.circular(20)),
+                                  child: Text(inv.syncStatus, style: TextStyle(color: inv.syncStatus == "Synced" ? Colors.green.shade800 : Colors.orange.shade800, fontSize: 12, fontWeight: FontWeight.bold)),
+                                )),
+                              ])).toList(),
                         ),
                       ),
                     );
@@ -689,7 +859,7 @@ class InvoiceListView extends StatelessWidget {
 }
 
 // ==========================================
-// 7. INVOICE CREATE VIEW
+// 8. INVOICE CREATE VIEW
 // ==========================================
 class InvoiceCreateView extends StatefulWidget {
   final VoidCallback onInvoiceSaved;
@@ -705,6 +875,7 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
   final _dateCtrl = TextEditingController();
   final _custNameCtrl = TextEditingController();
   final _custCodeCtrl = TextEditingController();
+  final _discountCtrl = TextEditingController(text: "0");
   String? _paymentTerms;
 
   List<Map<String, dynamic>> _invoiceItems = [];
@@ -714,7 +885,8 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
   @override
   void initState() {
     super.initState();
-    _dateCtrl.text = DateTime.now().toString().split(' ')[0];
+    final now = DateTime.now();
+    _dateCtrl.text = "${now.year}-${now.month}-${now.day} ${now.hour}:${now.minute}";
     _addNewItemRow();
   }
 
@@ -738,13 +910,36 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
       tempSub += lineAmt;
       tempTax += taxAmt;
     }
-    setState(() => _grandTotal = tempSub + tempTax);
+    double discount = double.tryParse(_discountCtrl.text) ?? 0.0;
+    setState(() => _grandTotal = (tempSub + tempTax) - discount);
   }
 
   Future<void> _submitInvoice() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isSaving = true);
-      await SyncService.saveInvoice(Invoice(id: _invoiceIdCtrl.text, customer: _custNameCtrl.text, code: _custCodeCtrl.text, date: _dateCtrl.text, amount: _grandTotal));
+
+      List<Map<String, dynamic>> finalItems = _invoiceItems.map((item) {
+        return {
+          "code": item['code'].text,
+          "name": item['name'].text,
+          "unit": item['unit'].text,
+          "qty": item['qty'].text,
+          "rate": item['rate'].text,
+          "amount": item['amount'],
+          "tax_amt": item['tax_amt']
+        };
+      }).toList();
+
+      await SyncService.saveInvoice(Invoice(
+        id: _invoiceIdCtrl.text,
+        customer: _custNameCtrl.text,
+        code: _custCodeCtrl.text,
+        date: _dateCtrl.text,
+        amount: _grandTotal,
+        discount: double.tryParse(_discountCtrl.text) ?? 0.0,
+        items: finalItems,
+      ));
+
       setState(() => _isSaving = false);
       widget.onInvoiceSaved();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invoice Saved Successfully!"), backgroundColor: Colors.green));
@@ -774,7 +969,6 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                       Expanded(child: _buildTableInput(item['qty'], "Qty", isNum: true, onChange: (v) => _calculateTotals())),
                     ]),
                     const SizedBox(height: 10),
-                    // RESTORED FIELDS: Tax & Line Total
                     Row(children: [
                       Expanded(child: _buildTableInput(item['tax_p'], "Tax %", isNum: true, onChange: (v) => _calculateTotals())),
                       const SizedBox(width: 10),
@@ -819,6 +1013,8 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
               children: [
                 const Text("New Sales Invoice", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 20),
+
+                // HEADER
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -831,7 +1027,10 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                     ),
                   ),
                 ),
+
                 const SizedBox(height: 20),
+
+                // ITEMS
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -843,6 +1042,7 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                           if(!isMobile) ElevatedButton.icon(onPressed: _addNewItemRow, icon: const Icon(Icons.add, size: 16), label: const Text("Add Item"))
                         ]),
                         const Divider(height: 30),
+
                         if (isMobile)
                           Column(children: [
                             Container(
@@ -897,7 +1097,13 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                   child: Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-                    child: Text("Grand Total: PKR ${_grandTotal.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
+                    child: Column(
+                      children: [
+                        SizedBox(width: 200, child: _buildTableInput(_discountCtrl, "Discount (PKR)", isNum: true, onChange: (v) => _calculateTotals())),
+                        const SizedBox(height: 10),
+                        Text("Grand Total: PKR ${_grandTotal.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
