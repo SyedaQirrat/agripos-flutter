@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'dart:convert'; // NEW: For JSON encoding
+import 'package:http/http.dart' as http; // NEW: For API calls
 
 void main() {
   runApp(const AgriPosApp());
@@ -38,7 +40,7 @@ class AgriPosApp extends StatelessWidget {
 }
 
 // ==========================================
-// 1. DATA MODELS & SYNC SERVICE
+// 1. DATA MODELS
 // ==========================================
 
 class Invoice {
@@ -73,31 +75,25 @@ class Product {
   Product({required this.code, required this.name, required this.unit, required this.price, required this.stock});
 }
 
+// ==========================================
+// 2. SYNC SERVICE (REAL API CONNECTION)
+// ==========================================
 class SyncService {
   static bool isOnline = true;
 
+  // URL of your .NET API (Assuming running on localhost via 'dotnet run')
+  // Note: If running on Android Emulator, use 'http://10.0.2.2:5000/api'
+  static const String _baseUrl = "http://localhost:5050/api";
+
+  // --- MOCK LOCAL DATABASE (Simulates SQLite) ---
   static final List<Invoice> _localInvoices = [
     Invoice(
-        id: "INV-1001",
-        customer: "Ali Farms",
-        code: "C001",
-        date: "2024-11-20 10:30",
-        amount: 5000,
-        discount: 0,
-        items: [
-          {"code": "P001", "name": "Urea 50kg", "unit": "Bag", "qty": "1", "rate": "4500", "amount": 4500.0, "tax_amt": 500.0}
-        ]
+        id: "INV-1001", customer: "Ali Farms", code: "C001", date: "2024-11-20 10:30", amount: 5000,
+        items: [{"code": "P001", "name": "Urea", "unit": "Bag", "qty": "1", "rate": "5000", "amount": 5000.0, "tax_amt": 0.0}]
     ),
     Invoice(
-        id: "INV-1002",
-        customer: "Green Acres",
-        code: "C002",
-        date: "2024-11-21 14:15",
-        amount: 12500,
-        syncStatus: "Pending",
-        items: [
-          {"code": "P002", "name": "DAP Fertilizer", "unit": "Bag", "qty": "1", "rate": "12000", "amount": 12000.0, "tax_amt": 500.0}
-        ]
+        id: "INV-1002", customer: "Green Acres", code: "C002", date: "2024-11-21 14:00", amount: 12500, syncStatus: "Pending",
+        items: [{"code": "P002", "name": "DAP", "unit": "Bag", "qty": "1", "rate": "12500", "amount": 12500.0, "tax_amt": 0.0}]
     ),
   ];
 
@@ -114,14 +110,25 @@ class SyncService {
   static int getPendingCount() => _localInvoices.where((i) => i.syncStatus == "Pending").length;
   static double getTotalSales() => _localInvoices.fold(0, (sum, item) => sum + item.amount);
 
+  // --- HYBRID SAVE LOGIC ---
   static Future<void> saveInvoice(Invoice invoice) async {
+    // 1. Always Save to Local SQLite first (Persistence)
+    _localInvoices.add(invoice);
+
     if (isOnline) {
-      await Future.delayed(const Duration(seconds: 1));
-      invoice.syncStatus = "Synced";
-      _localInvoices.add(invoice);
+      try {
+        // 2a. ONLINE: Send to .NET API
+        await _pushToSQLServer(invoice);
+        invoice.syncStatus = "Synced";
+      } catch (e) {
+        // Fallback: If API fails/timeouts, mark as Pending
+        print("API Error: $e");
+        invoice.syncStatus = "Pending";
+      }
     } else {
+      // 2b. OFFLINE: Mark as Pending
+      print("OFFLINE: Queued for Sync");
       invoice.syncStatus = "Pending";
-      _localInvoices.add(invoice);
     }
   }
 
@@ -129,20 +136,67 @@ class SyncService {
     _localProducts.add(p);
   }
 
+  // --- SYNC PENDING ITEMS ---
   static Future<void> syncPendingItems(Function(String) onProgress) async {
     if (!isOnline) return;
+
     List<Invoice> pendingItems = _localInvoices.where((i) => i.syncStatus == "Pending").toList();
+
     for (var invoice in pendingItems) {
       onProgress("Syncing ${invoice.id}...");
-      await Future.delayed(const Duration(milliseconds: 500));
-      invoice.syncStatus = "Synced";
+      try {
+        await _pushToSQLServer(invoice);
+        invoice.syncStatus = "Synced";
+      } catch (e) {
+        print("Failed to sync ${invoice.id}: $e");
+      }
     }
     onProgress("Sync Complete!");
+  }
+
+  // --- REAL API CONNECTION ---
+  static Future<void> _pushToSQLServer(Invoice invoice) async {
+    final url = Uri.parse('$_baseUrl/invoices');
+
+    // Convert Invoice Object to JSON for API
+    final body = jsonEncode({
+      "Id": invoice.id,
+      "CustomerName": invoice.customer,
+      "CustomerCode": invoice.code,
+      "Date": invoice.date,
+      "TotalAmount": invoice.amount,
+      "Discount": invoice.discount,
+      "SyncStatus": "Synced",
+      "Items": invoice.items.map((i) => {
+        "ItemCode": i['code'],
+        "ItemName": i['name'],
+        "Unit": i['unit'],
+        "Qty": double.tryParse(i['qty'].toString()) ?? 0,
+        "Rate": double.tryParse(i['rate'].toString()) ?? 0,
+        "Amount": i['amount'],
+        "TaxAmount": i['tax_amt']
+      }).toList()
+    });
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {"Content-Type": "application/json"},
+        body: body,
+      );
+
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception("Server Error: ${response.statusCode} - ${response.body}");
+      }
+      print("SERVER: Invoice ${invoice.id} synced successfully.");
+    } catch (e) {
+      throw Exception("Connection Failed: $e");
+    }
   }
 }
 
 // ==========================================
-// 2. LOGIN SCREEN
+// 3. LOGIN SCREEN
 // ==========================================
 class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
@@ -205,7 +259,7 @@ class LoginScreen extends StatelessWidget {
 }
 
 // ==========================================
-// 3. MAIN LAYOUT
+// 4. MAIN LAYOUT
 // ==========================================
 class MainLayoutShell extends StatefulWidget {
   const MainLayoutShell({super.key});
@@ -222,7 +276,7 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
   void _handleOfflineToggle(bool value) async {
     setState(() => SyncService.isOnline = !value);
     if (SyncService.isOnline && SyncService.getPendingCount() > 0) {
-      setState(() { _isSyncing = true; _syncMessage = "Syncing..."; });
+      setState(() { _isSyncing = true; _syncMessage = "Connecting to SQL Server..."; });
       await SyncService.syncPendingItems((status) => setState(() => _syncMessage = status));
       setState(() => _isSyncing = false);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sync Complete!")));
@@ -272,7 +326,7 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
               children: [
                 Icon(Icons.circle, size: 10, color: isOffline ? Colors.red : Colors.green),
                 const SizedBox(width: 8),
-                Text(isOffline ? "OFFLINE" : "ONLINE", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isOffline ? Colors.red.shade700 : Colors.green.shade700)),
+                Text(isOffline ? "OFFLINE DB" : "SQL SERVER", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isOffline ? Colors.red.shade700 : Colors.green.shade700)),
                 const SizedBox(width: 8),
                 SizedBox(
                   height: 20,
@@ -318,139 +372,6 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
           NavigationDestination(icon: Icon(Icons.add_circle_outline), selectedIcon: Icon(Icons.add_circle), label: 'New Sale'),
         ],
       ) : null,
-    );
-  }
-}
-
-// ==========================================
-// 4. INVOICE RECEIPT SCREEN (FIXED OVERFLOW)
-// ==========================================
-class InvoiceDetailScreen extends StatelessWidget {
-  final Invoice invoice;
-  const InvoiceDetailScreen({super.key, required this.invoice});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[200],
-      appBar: AppBar(title: const Text("Invoice Details")),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 500),
-            child: Card(
-              color: Colors.white,
-              elevation: 5,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(0)),
-              child: Padding(
-                // FIX: Reduced padding from 30 to 20 to prevent overflow
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header
-                    Center(
-                      child: Column(
-                        children: [
-                          const Icon(Icons.agriculture, size: 50, color: Colors.green),
-                          const SizedBox(height: 10),
-                          const Text("AgriPOS Inc.", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                          Text("Sales Receipt", style: TextStyle(color: Colors.grey[600], letterSpacing: 1.2)),
-                        ],
-                      ),
-                    ),
-                    const Divider(height: 40, thickness: 2),
-
-                    // Info Grid (FIXED WITH EXPANDED)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text("Invoice No:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                            Text(invoice.id, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 10),
-                            Text("Customer:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                            Text(invoice.customer, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          ]),
-                        ),
-                        Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                            Text("Date & Time:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                            Text(invoice.date, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 10),
-                            Text("Code:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                            Text(invoice.code, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          ]),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 30),
-
-                    // Items Table
-                    const Text("Purchase Details", style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 10),
-                    Table(
-                      border: TableBorder(bottom: BorderSide(color: Colors.grey.shade300)),
-                      columnWidths: const {0: FlexColumnWidth(3), 1: FlexColumnWidth(1), 2: FlexColumnWidth(2)},
-                      children: [
-                        TableRow(
-                            decoration: BoxDecoration(color: Colors.grey[100]),
-                            children: const [
-                              Padding(padding: EdgeInsets.all(8), child: Text("Item")),
-                              Padding(padding: EdgeInsets.all(8), child: Text("Qty")),
-                              Padding(padding: EdgeInsets.all(8), child: Text("Total", textAlign: TextAlign.right)),
-                            ]
-                        ),
-                        ...invoice.items.map((item) => TableRow(
-                            children: [
-                              Padding(padding: const EdgeInsets.all(8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text(item['name'], style: const TextStyle(fontWeight: FontWeight.w500)),
-                                Text("@ ${item['rate']}/${item['unit']}", style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                              ])),
-                              Padding(padding: const EdgeInsets.all(8), child: Text(item['qty'], style: const TextStyle(height: 1.5))),
-                              Padding(padding: const EdgeInsets.all(8), child: Text(item['amount'].toStringAsFixed(0), textAlign: TextAlign.right, style: const TextStyle(height: 1.5))),
-                            ]
-                        )).toList()
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Totals
-                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      const Text("Discount:", style: TextStyle(color: Colors.grey)),
-                      Text("- PKR ${invoice.discount.toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold)),
-                    ]),
-                    const SizedBox(height: 5),
-                    const Divider(),
-                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      const Text("GRAND TOTAL", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      Text("PKR ${invoice.amount.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
-                    ]),
-
-                    const SizedBox(height: 40),
-                    Center(
-                      child: Text("Thank you for your business!", style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[600])),
-                    ),
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: (){},
-                        icon: const Icon(Icons.print),
-                        label: const Text("PRINT RECEIPT"),
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
-                      ),
-                    )
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -892,7 +813,17 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
 
   void _addNewItemRow() {
     setState(() {
-      _invoiceItems.add({"code": TextEditingController(), "name": TextEditingController(), "unit": TextEditingController(), "qty": TextEditingController(text: "1"), "rate": TextEditingController(text: "0"), "tax_p": TextEditingController(text: "0"), "amount": 0.0, "tax_amt": 0.0});
+      _invoiceItems.add({
+        "code": TextEditingController(),
+        "name": TextEditingController(),
+        "unit": TextEditingController(),
+        "qty": TextEditingController(text: "1"),
+        "rate": TextEditingController(text: "0"),
+        "tax_p": TextEditingController(text: "0"),
+        "amount": 0.0,
+        "tax_amt": 0.0,
+        "selectedProduct": null
+      });
     });
   }
 
@@ -917,7 +848,6 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
   Future<void> _submitInvoice() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isSaving = true);
-
       List<Map<String, dynamic>> finalItems = _invoiceItems.map((item) {
         return {
           "code": item['code'].text,
@@ -942,7 +872,7 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
 
       setState(() => _isSaving = false);
       widget.onInvoiceSaved();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invoice Saved Successfully!"), backgroundColor: Colors.green));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invoice Saved!"), backgroundColor: Colors.green));
     }
   }
 
@@ -959,9 +889,13 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(children: [
-                    Row(children: [Expanded(child: _buildTextField("Code", item['code'])), const SizedBox(width: 10), Expanded(child: _buildTextField("Unit", item['unit']))]),
+                    _buildProductDropdown(item),
                     const SizedBox(height: 10),
-                    _buildTextField("Item Name", item['name']),
+                    Row(children: [
+                      Expanded(child: _buildTextField("Code", item['code'], readOnly: true)),
+                      const SizedBox(width: 10),
+                      Expanded(child: _buildTextField("Unit", item['unit'], readOnly: true))
+                    ]),
                     const SizedBox(height: 10),
                     Row(children: [
                       Expanded(child: _buildTableInput(item['rate'], "Rate", isNum: true, onChange: (v) => _calculateTotals())),
@@ -997,6 +931,29 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
     )));
   }
 
+  Widget _buildProductDropdown(Map<String, dynamic> item) {
+    List<Product> availableProducts = SyncService.getProducts();
+    return DropdownButtonFormField<Product>(
+      decoration: const InputDecoration(labelText: "Select Product", contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12), isDense: true),
+      value: item['selectedProduct'],
+      items: availableProducts.map((p) {
+        return DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis));
+      }).toList(),
+      onChanged: (Product? p) {
+        if (p != null) {
+          setState(() {
+            item['selectedProduct'] = p;
+            item['name'].text = p.name;
+            item['code'].text = p.code;
+            item['unit'].text = p.unit;
+            item['rate'].text = p.price.toStringAsFixed(0);
+            _calculateTotals();
+          });
+        }
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     bool isMobile = MediaQuery.of(context).size.width < 700;
@@ -1013,8 +970,6 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
               children: [
                 const Text("New Sales Invoice", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 20),
-
-                // HEADER
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -1027,10 +982,7 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 20),
-
-                // ITEMS
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -1042,7 +994,6 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                           if(!isMobile) ElevatedButton.icon(onPressed: _addNewItemRow, icon: const Icon(Icons.add, size: 16), label: const Text("Add Item"))
                         ]),
                         const Divider(height: 30),
-
                         if (isMobile)
                           Column(children: [
                             Container(
@@ -1062,8 +1013,8 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                                 Container(
                                   padding: const EdgeInsets.only(bottom: 10),
                                   child: const Row(children: [
+                                    SizedBox(width: 250, child: Text("Select Product", style: TextStyle(fontWeight: FontWeight.bold))), SizedBox(width: 10),
                                     SizedBox(width: 80, child: Text("Code", style: TextStyle(fontWeight: FontWeight.bold))), SizedBox(width: 10),
-                                    SizedBox(width: 200, child: Text("Item Name", style: TextStyle(fontWeight: FontWeight.bold))), SizedBox(width: 10),
                                     SizedBox(width: 80, child: Text("Unit", style: TextStyle(fontWeight: FontWeight.bold))), SizedBox(width: 10),
                                     SizedBox(width: 100, child: Text("Rate", style: TextStyle(fontWeight: FontWeight.bold))), SizedBox(width: 10),
                                     SizedBox(width: 80, child: Text("Qty", style: TextStyle(fontWeight: FontWeight.bold))), SizedBox(width: 10),
@@ -1075,16 +1026,18 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
                                 ...List.generate(_invoiceItems.length, (index) {
                                   final item = _invoiceItems[index];
                                   return Padding(padding: const EdgeInsets.only(bottom: 10), child: Row(children: [
-                                    SizedBox(width: 80, child: _buildTextField("Code", item['code'])), const SizedBox(width: 10),
-                                    SizedBox(width: 200, child: _buildTextField("Item", item['name'])), const SizedBox(width: 10),
-                                    SizedBox(width: 80, child: _buildTextField("Unit", item['unit'])), const SizedBox(width: 10),
+                                    SizedBox(width: 250, child: _buildProductDropdown(item)), const SizedBox(width: 10),
+                                    SizedBox(width: 80, child: _buildTextField("Code", item['code'], readOnly: true)), const SizedBox(width: 10),
+                                    SizedBox(width: 80, child: _buildTextField("Unit", item['unit'], readOnly: true)), const SizedBox(width: 10),
                                     SizedBox(width: 100, child: _buildTableInput(item['rate'], "Rate", isNum: true, onChange: (v) => _calculateTotals())), const SizedBox(width: 10),
                                     SizedBox(width: 80, child: _buildTableInput(item['qty'], "Qty", isNum: true, onChange: (v) => _calculateTotals())), const SizedBox(width: 10),
                                     SizedBox(width: 100, child: Text(item['amount'].toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.bold))), const SizedBox(width: 10),
                                     SizedBox(width: 60, child: _buildTableInput(item['tax_p'], "Tax", isNum: true, onChange: (v) => _calculateTotals())), const SizedBox(width: 10),
                                     SizedBox(width: 80, child: Text(item['tax_amt'].toStringAsFixed(2))),
+                                    IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => setState(() { if(_invoiceItems.length > 1) _invoiceItems.removeAt(index); _calculateTotals(); })),
                                   ]));
-                                })]),
+                                })
+                              ]),
                             ),
                           )
                       ],
@@ -1121,5 +1074,119 @@ class _InvoiceCreateViewState extends State<InvoiceCreateView> {
   }
   Widget _buildTableInput(TextEditingController ctrl, String hint, {bool isNum = false, Function(String)? onChange}) {
     return TextFormField(controller: ctrl, onChanged: onChange, keyboardType: isNum ? TextInputType.number : TextInputType.text, inputFormatters: isNum ? [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))] : [], decoration: InputDecoration(labelText: hint, contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12), isDense: true));
+  }
+}
+
+// ==========================================
+// 9. INVOICE RECEIPT SCREEN
+// ==========================================
+class InvoiceDetailScreen extends StatelessWidget {
+  final Invoice invoice;
+  const InvoiceDetailScreen({super.key, required this.invoice});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.grey[200],
+      appBar: AppBar(title: const Text("Invoice Details")),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 500),
+            child: Card(
+              color: Colors.white,
+              elevation: 5,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(0)),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Column(
+                        children: [
+                          const Icon(Icons.agriculture, size: 50, color: Colors.green),
+                          const SizedBox(height: 10),
+                          const Text("AgriPOS Inc.", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                          Text("Sales Receipt", style: TextStyle(color: Colors.grey[600], letterSpacing: 1.2)),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 40, thickness: 2),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text("Invoice No:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                            Text(invoice.id, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 10),
+                            Text("Customer:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                            Text(invoice.customer, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ]),
+                        ),
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                            Text("Date & Time:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                            Text(invoice.date, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 10),
+                            Text("Code:", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                            Text(invoice.code, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ]),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 30),
+                    const Text("Purchase Details", style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 10),
+                    Table(
+                      border: TableBorder(bottom: BorderSide(color: Colors.grey.shade300)),
+                      columnWidths: const {0: FlexColumnWidth(3), 1: FlexColumnWidth(1), 2: FlexColumnWidth(2)},
+                      children: [
+                        TableRow(
+                            decoration: BoxDecoration(color: Colors.grey[100]),
+                            children: const [
+                              Padding(padding: EdgeInsets.all(8), child: Text("Item")),
+                              Padding(padding: EdgeInsets.all(8), child: Text("Qty")),
+                              Padding(padding: EdgeInsets.all(8), child: Text("Total", textAlign: TextAlign.right)),
+                            ]
+                        ),
+                        ...invoice.items.map((item) => TableRow(
+                            children: [
+                              Padding(padding: const EdgeInsets.all(8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(item['name'], style: const TextStyle(fontWeight: FontWeight.w500)),
+                                Text("@ ${item['rate']}/${item['unit']}", style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                              ])),
+                              Padding(padding: const EdgeInsets.all(8), child: Text(item['qty'], style: const TextStyle(height: 1.5))),
+                              Padding(padding: const EdgeInsets.all(8), child: Text(item['amount'].toStringAsFixed(0), textAlign: TextAlign.right, style: const TextStyle(height: 1.5))),
+                            ]
+                        )).toList()
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      const Text("Discount:", style: TextStyle(color: Colors.grey)),
+                      Text("- PKR ${invoice.discount.toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ]),
+                    const SizedBox(height: 5),
+                    const Divider(),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      const Text("GRAND TOTAL", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text("PKR ${invoice.amount.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
+                    ]),
+                    const SizedBox(height: 40),
+                    Center(child: Text("Thank you for your business!", style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[600]))),
+                    const SizedBox(height: 20),
+                    SizedBox(width: double.infinity, child: ElevatedButton.icon(onPressed: (){}, icon: const Icon(Icons.print), label: const Text("PRINT RECEIPT"), style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white))),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
